@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from newsletter_agent.config import DEFAULT_RECENCY_DAYS
 from newsletter_agent.domain.models import DeliveryReport
 from newsletter_agent.services.email_outbox import EmlFileOutbox
 from newsletter_agent.services.newsletter_renderer import NewsletterRenderer
@@ -29,7 +30,7 @@ def test_search_tools_delegate_to_their_sources() -> None:
     assert web_search.invoke({"query": "agents", "recency_days": 3}) == [make_article(1)]
     assert news_feed.invoke({"query": "agents"}) == [make_article(2)]
     assert web_source.received_searches == [("agents", 3)]
-    assert feed_source.received_searches == [("agents", 7)]
+    assert feed_source.received_searches == [("agents", DEFAULT_RECENCY_DAYS)]
 
 
 def test_search_tools_describe_themselves_for_the_model() -> None:
