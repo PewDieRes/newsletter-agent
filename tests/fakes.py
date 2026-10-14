@@ -115,3 +115,15 @@ class FakeNewsSource:
         if self._error is not None:
             raise self._error
         return list(self._articles)
+
+
+class FakeArticleFetcher:
+    """An ArticleFetcher that returns canned page text by URL."""
+
+    def __init__(self, contents: dict[str, str] | None = None) -> None:
+        self._contents = dict(contents or {})
+        self.fetched_urls: list[str] = []
+
+    def fetch(self, url: str) -> str:
+        self.fetched_urls.append(url)
+        return self._contents.get(url, "")
