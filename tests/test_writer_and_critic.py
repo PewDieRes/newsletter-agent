@@ -1,3 +1,4 @@
+import pytest
 from langgraph.graph import END
 
 from newsletter_agent.agent.node_names import DRAFT_REVIEW, SENDER, WRITER
@@ -132,3 +133,9 @@ def test_route_after_draft_review() -> None:
     assert route_after_draft_review({"review_decision": "approve"}) == SENDER
     assert route_after_draft_review({"review_decision": "revise"}) == WRITER
     assert route_after_draft_review({"review_decision": "reject"}) == END
+
+
+@pytest.mark.parametrize("state", [{}, {"review_decision": None}, {"review_decision": "maybe"}])
+def test_route_after_draft_review_rejects_missing_or_unknown_decision(state: dict) -> None:
+    with pytest.raises(ValueError, match="No valid review decision before sending"):
+        route_after_draft_review(state)

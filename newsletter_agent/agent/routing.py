@@ -22,10 +22,15 @@ def build_route_after_critique(settings: Settings) -> Callable[[NewsletterState]
 
 
 def route_after_draft_review(state: NewsletterState) -> str:
-    """Send on approval, rewrite on revision request, stop on rejection."""
+    """Send only on explicit approval, rewrite on revision request, stop on rejection.
+
+    Any missing or unknown decision raises instead of sending, since sending is irreversible.
+    """
     review_decision = state.get("review_decision")
+    if review_decision == "approve":
+        return SENDER
     if review_decision == "revise":
         return WRITER
     if review_decision == "reject":
         return END
-    return SENDER
+    raise ValueError(f"No valid review decision before sending: {review_decision!r}")
