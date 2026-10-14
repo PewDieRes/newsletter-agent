@@ -2,11 +2,19 @@
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage
+from langgraph.checkpoint.memory import InMemorySaver
 
-from newsletter_agent.domain.llm_outputs import ArticleCopy, NewsletterCopy, SummaryBatch
+from newsletter_agent.config import Settings
+from newsletter_agent.domain.llm_outputs import (
+    ArticleCopy,
+    ArticleSelection,
+    NewsletterCopy,
+    SummaryBatch,
+)
 from newsletter_agent.domain.models import (
     Article,
     ArticleSummary,
@@ -198,3 +206,62 @@ def make_tool_call_message(*tool_calls: tuple[str, str]) -> AIMessage:
 
 def search_both_tools_message() -> AIMessage:
     return make_tool_call_message(("web_search", "AI agents news"), ("news_feed", "AI agents"))
+
+
+def make_test_settings(tmp_path: Path, **overrides: Any) -> Settings:
+    return Settings(
+        _env_file=None,
+        google_api_key="test-google-key",
+        tavily_api_key="test-tavily-key",
+        outbox_directory=tmp_path / "outbox",
+        **overrides,
+    )
+
+
+def default_structured_responses(critique_scores: Sequence[int] = (9,)) -> dict[type, list[Any]]:
+    return {
+        NewsletterPlan: [make_plan()],
+        ArticleSelection: [
+            ArticleSelection(selected_article_numbers=[1, 2, 3, 4, 5], rationale="Top stories")
+        ],
+        SummaryBatch: [make_summary_batch(7)],
+        NewsletterCopy: [make_newsletter_copy(7)],
+        CritiqueReport: [make_critique(score) for score in critique_scores],
+    }
+
+
+def build_test_dependencies(
+    tmp_path: Path,
+    language_model: FakeLanguageModel,
+    web_search_source: FakeNewsSource | None = None,
+    news_feed_source: FakeNewsSource | None = None,
+    settings: Settings | None = None,
+):
+    from newsletter_agent.agent.dependencies import AgentDependencies
+    from newsletter_agent.services.email_outbox import EmlFileOutbox
+    from newsletter_agent.services.newsletter_renderer import NewsletterRenderer
+
+    active_settings = settings or make_test_settings(tmp_path)
+    return AgentDependencies(
+        language_model=language_model,
+        web_search_source=web_search_source
+        or FakeNewsSource("web_search", [make_article(number) for number in range(1, 4)]),
+        news_feed_source=news_feed_source
+        or FakeNewsSource("news_feed", [make_article(number) for number in range(4, 7)]),
+        article_fetcher=FakeArticleFetcher(),
+        renderer=NewsletterRenderer(active_settings.newsletter_name),
+        email_sender=EmlFileOutbox(
+            active_settings.outbox_directory, active_settings.sender_address
+        ),
+        subscribers=list(TEST_SUBSCRIBERS),
+        settings=active_settings,
+    )
+
+
+def build_test_runner(dependencies):
+    from newsletter_agent.agent.graph import build_newsletter_graph
+    from newsletter_agent.agent.runner import NewsletterAgentRunner
+
+    return NewsletterAgentRunner(
+        build_newsletter_graph(dependencies, InMemorySaver()), dependencies.settings
+    )
