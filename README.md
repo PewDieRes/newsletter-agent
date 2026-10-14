@@ -70,6 +70,8 @@ python main.py --mode auto         # one-call autonomous run in the terminal
 python main.py --mode hitl         # human-in-the-loop in the terminal
 ```
 
+`GEMINI_FALLBACK_MODEL` (default `gemini-3.5-flash-lite`) is used when the primary `GEMINI_MODEL` fails, for example during a 503 overload. After such a failure the agent keeps using the fallback for a few minutes before trying the primary again. Set it to an empty value to disable the fallback.
+
 From Python:
 
 ```python
@@ -79,6 +81,22 @@ result = run_newsletter_agent(
     "Create a weekly newsletter on latest AI agent news and send it to our subscribers."
 )
 print(result.status, result.final_state["delivery_report"])
+```
+
+To watch the agent work, stream its trace instead:
+
+```python
+from newsletter_agent.agent.runner import get_default_runner, new_thread_id
+
+runner = get_default_runner()
+thread_id = new_thread_id()
+for trace_entry in runner.stream_run(
+    "Create a weekly newsletter on latest AI agent news and send it to our subscribers.",
+    "auto",
+    thread_id,
+):
+    print(f"{trace_entry.step}: {trace_entry.message}")
+print(runner.get_result(thread_id).status)
 ```
 
 ## Tests
