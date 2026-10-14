@@ -82,7 +82,19 @@ def test_deduplicate_prefers_publisher_url_over_google_news_link() -> None:
     assert deduplicate_articles([google_copy, publisher_copy]) == [publisher_copy]
 
 
+def test_normalize_url_keeps_identifying_query_parameters() -> None:
+    assert normalize_url("https://site.com/item?id=2&utm_medium=x") == "site.com/item?id=2"
+
+    first = make_article(1, url="https://site.com/item?id=1")
+    second = make_article(2, url="https://site.com/item?id=2")
+
+    assert deduplicate_articles([first, second]) == [first, second]
+
+
 def test_normalizers() -> None:
     assert normalize_title("  OpenAI Ships: New Agent-Toolkit! ") == "openai ships new agenttoolkit"
-    assert normalize_url("https://www.Example.com/a/b/?utm=1") == "example.com/a/b"
+    assert (
+        normalize_url("https://www.Example.com/a/b/?utm_source=newsletter&fbclid=abc")
+        == "example.com/a/b"
+    )
     assert normalize_url("not a url") == ""

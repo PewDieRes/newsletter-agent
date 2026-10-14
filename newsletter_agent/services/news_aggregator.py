@@ -4,7 +4,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from itertools import chain
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from newsletter_agent.domain.models import Article
 from newsletter_agent.errors import ResearchFailedError
@@ -12,6 +12,8 @@ from newsletter_agent.services.news_sources import NewsSource
 
 GOOGLE_NEWS_HOST = "news.google.com"
 NON_ALPHANUMERIC_PATTERN = re.compile(r"[^a-z0-9 ]")
+TRACKING_QUERY_PARAMETERS = frozenset({"fbclid", "gclid", "mc_cid", "mc_eid", "ref"})
+TRACKING_QUERY_PREFIX = "utm_"
 
 
 @dataclass(frozen=True)
@@ -36,13 +38,31 @@ def normalize_title(title: str) -> str:
     return " ".join(NON_ALPHANUMERIC_PATTERN.sub("", title.lower()).split())
 
 
+def _is_tracking_parameter(parameter_name: str) -> bool:
+    return parameter_name.startswith(TRACKING_QUERY_PREFIX) or (
+        parameter_name in TRACKING_QUERY_PARAMETERS
+    )
+
+
 def normalize_url(url: str) -> str:
-    """Reduce a URL to host + path so scheme, 'www.', query, and trailing slashes don't matter."""
+    """Reduce a URL to host + path + identifying query parameters.
+
+    Scheme, 'www.', trailing slashes, and tracking parameters (utm_*, fbclid, etc.)
+    are ignored, so only query parameters that identify the article are kept.
+    """
     url_parts = urlsplit(url.strip())
     if not url_parts.netloc:
         return ""
     host = url_parts.netloc.lower().removeprefix("www.")
-    return f"{host}{url_parts.path.rstrip('/')}"
+    key = f"{host}{url_parts.path.rstrip('/')}"
+    identifying_pairs = sorted(
+        (parameter_name, parameter_value)
+        for parameter_name, parameter_value in parse_qsl(url_parts.query, keep_blank_values=True)
+        if not _is_tracking_parameter(parameter_name)
+    )
+    if identifying_pairs:
+        key += "?" + urlencode(identifying_pairs)
+    return key
 
 
 def _is_google_news_link(url: str) -> bool:
