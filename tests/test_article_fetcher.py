@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import httpx
 
 from newsletter_agent.services.article_fetcher import HttpArticleFetcher
@@ -22,7 +24,10 @@ ARTICLE_HTML = f"""
 """
 
 
-def build_fetcher(handle_request, max_characters: int = 3000) -> HttpArticleFetcher:
+def build_fetcher(
+    handle_request: Callable[[httpx.Request], httpx.Response],
+    max_characters: int = 3000,
+) -> HttpArticleFetcher:
     http_client = httpx.Client(transport=httpx.MockTransport(handle_request))
     return HttpArticleFetcher(http_client, max_characters=max_characters)
 
@@ -41,7 +46,7 @@ def test_fetch_truncates_to_max_characters() -> None:
         lambda request: httpx.Response(200, text=ARTICLE_HTML), max_characters=50
     )
 
-    assert len(fetcher.fetch("https://example.com/agents")) <= 50
+    assert len(fetcher.fetch("https://example.com/agents")) == 50
 
 
 def test_fetch_returns_empty_string_on_http_error() -> None:
@@ -57,3 +62,9 @@ def test_fetch_returns_empty_string_on_timeout() -> None:
     fetcher = build_fetcher(raise_timeout)
 
     assert fetcher.fetch("https://example.com/slow") == ""
+
+
+def test_fetch_returns_empty_string_for_malformed_url() -> None:
+    fetcher = build_fetcher(lambda request: httpx.Response(200, text=ARTICLE_HTML))
+
+    assert fetcher.fetch("http://example.com:notaport/x") == ""

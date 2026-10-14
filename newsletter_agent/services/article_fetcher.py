@@ -26,7 +26,7 @@ class HttpArticleFetcher:
         try:
             response = self._http_client.get(url)
             response.raise_for_status()
-        except httpx.HTTPError:
+        except (httpx.HTTPError, httpx.InvalidURL):
             return ""
         extracted_text = trafilatura.extract(response.text) or ""
         return extracted_text[: self._max_characters]
