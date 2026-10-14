@@ -48,7 +48,7 @@ def apply_draft_review(
     draft: NewsletterDraft, human_response: DraftReviewResponse, renderer: NewsletterRenderer
 ) -> dict[str, Any]:
     """Turn the human's decision into a state update."""
-    decision = human_response.get("decision", "approve")
+    decision = human_response.get("decision")
     if decision == "reject":
         return {
             "review_decision": "reject",

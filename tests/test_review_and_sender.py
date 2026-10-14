@@ -104,3 +104,8 @@ def test_sender_uses_thread_id_as_batch_name(tmp_path: Path) -> None:
     assert update["delivery_report"].recipient_count == len(TEST_SUBSCRIBERS)
     assert len(list((tmp_path / "thread-123").glob("*.eml"))) == len(TEST_SUBSCRIBERS)
     assert "3 subscribers" in update["trace_log"][0].message
+
+
+def test_missing_decision_is_rejected_loudly() -> None:
+    with pytest.raises(ValueError, match="Unknown review decision"):
+        apply_draft_review(make_draft(), {}, RENDERER)
