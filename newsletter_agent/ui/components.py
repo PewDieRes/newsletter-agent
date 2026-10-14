@@ -13,6 +13,7 @@ from newsletter_agent.domain.models import AgentMode, TraceEntry
 
 MODE_LABELS: dict[str, AgentMode] = {"Fully Autonomous": "auto", "Human-in-the-Loop": "hitl"}
 PREVIEW_HEIGHT_PIXELS = 720
+MARKDOWN_CONTROL_CHARACTERS = frozenset("\\$*_[]`#")
 
 
 @dataclass(frozen=True)
@@ -53,9 +54,20 @@ def email_preview_source(html_body: str) -> str:
     return f"data:text/html;charset=utf-8;base64,{encoded_html}"
 
 
+def escape_markdown(text: str) -> str:
+    """Escape Markdown control characters so web and model text renders literally.
+
+    Streamlit would otherwise turn "$40M at $400M" into LaTeX, or a stray "*" into italics.
+    """
+    return "".join(
+        f"\\{character}" if character in MARKDOWN_CONTROL_CHARACTERS else character
+        for character in text
+    )
+
+
 def format_trace_line(trace_entry: TraceEntry) -> str:
-    """Format one trace entry as a Markdown line."""
-    return f"**{trace_entry.step}** · {trace_entry.message}"
+    """Format one trace entry as a Markdown line with a bold step label."""
+    return f"**{trace_entry.step}** · {escape_markdown(trace_entry.message)}"
 
 
 def render_trace(trace_entries: Sequence[TraceEntry]) -> None:
@@ -76,11 +88,12 @@ def render_article_review(payload: dict[str, Any], key_prefix: str) -> ArticleRe
         kept_urls: list[str] = []
         for position, candidate in enumerate(ordered_candidates, start=1):
             is_kept = st.checkbox(
-                f"**{candidate['title']}** · {candidate['source_name']}",
+                f"**{escape_markdown(candidate['title'])}** · "
+                f"{escape_markdown(candidate['source_name'])}",
                 value=candidate["url"] in agent_selection,
                 key=f"{key_prefix}_article_{position}",
             )
-            st.caption(f"{candidate['snippet'][:200]} [link]({candidate['url']})")
+            st.caption(f"{escape_markdown(candidate['snippet'][:200])} [link]({candidate['url']})")
             if is_kept:
                 kept_urls.append(candidate["url"])
         submitted = st.form_submit_button("Approve selection", type="primary")
@@ -96,7 +109,7 @@ def render_critique(critique: dict[str, Any]) -> None:
     """Show the critic's score and issues."""
     st.metric("Critique score", f"{critique['score']}/10")
     for issue in critique.get("issues", []):
-        st.markdown(f"- {issue}")
+        st.markdown(f"- {escape_markdown(issue)}")
 
 
 def render_draft_review(payload: dict[str, Any], key_prefix: str) -> DraftReviewResponse | None:
@@ -145,7 +158,7 @@ def render_delivery(final_state: dict[str, Any], sender_address: str) -> None:
     st.markdown(
         f"**From:** {sender_address}  \n"
         f"**To:** {delivery_report.recipient_count} subscribers  \n"
-        f"**Subject:** {draft.subject}"
+        f"**Subject:** {escape_markdown(draft.subject)}"
     )
     if critique_scores:
         st.caption(f"Critique scores across drafts: {' → '.join(critique_scores)}")

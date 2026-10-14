@@ -5,7 +5,12 @@ from streamlit.testing.v1 import AppTest
 
 from newsletter_agent.config import DEFAULT_GOAL
 from newsletter_agent.domain.models import TraceEntry
-from newsletter_agent.ui.components import MODE_LABELS, email_preview_source, format_trace_line
+from newsletter_agent.ui.components import (
+    MODE_LABELS,
+    email_preview_source,
+    escape_markdown,
+    format_trace_line,
+)
 
 
 def test_mode_labels_map_to_agent_modes() -> None:
@@ -15,6 +20,22 @@ def test_mode_labels_map_to_agent_modes() -> None:
 def test_format_trace_line_shows_step_and_message() -> None:
     assert format_trace_line(TraceEntry(step="critic", message="Score 9/10")) == (
         "**critic** · Score 9/10"
+    )
+
+
+def test_escape_markdown_keeps_dollar_amounts_literal() -> None:
+    assert escape_markdown("raises $40M at $400M") == r"raises \$40M at \$400M"
+
+
+def test_escape_markdown_escapes_every_markdown_control_character() -> None:
+    assert escape_markdown(r"\ $ * _ [ ] ` #") == r"\\ \$ \* \_ \[ \] \` \#"
+
+
+def test_format_trace_line_escapes_the_message_but_keeps_the_bold_step() -> None:
+    trace_entry = TraceEntry(step="researcher", message="web_search('$40M *deal*') returned 3")
+
+    assert format_trace_line(trace_entry) == (
+        r"**researcher** · web\_search('\$40M \*deal\*') returned 3"
     )
 
 
@@ -43,10 +64,10 @@ def test_render_article_review_shows_candidates() -> None:
 
         candidates = [
             {
-                "title": f"Article {number}",
+                "title": f"Article {number} raises $40M",
                 "url": f"https://example.com/{number}",
-                "source_name": "Example",
-                "snippet": "A snippet",
+                "source_name": "Example_News",
+                "snippet": "A snippet about $400M",
             }
             for number in (1, 2)
         ]
@@ -58,6 +79,8 @@ def test_render_article_review_shows_candidates() -> None:
 
     assert not app_test.exception
     assert len(app_test.checkbox) == 2
+    assert app_test.checkbox[0].label == r"**Article 1 raises \$40M** · Example\_News"
+    assert app_test.caption[0].value.startswith(r"A snippet about \$400M")
     assert app_test.button[0].label == "Approve selection"
 
 
