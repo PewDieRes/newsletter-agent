@@ -104,3 +104,31 @@ def test_researcher_reports_unknown_tool_to_model() -> None:
 
     assert any("unknown tool 'made_up_tool'" in entry.message for entry in update["trace_log"])
     assert len(update["candidate_articles"]) == 6
+
+
+def test_researcher_queries_source_the_model_skipped() -> None:
+    web_source = FakeNewsSource("web_search", [make_article(number) for number in range(1, 7)])
+    feed_source = FakeNewsSource("news_feed", [make_article(7)])
+    language_model = FakeLanguageModel(
+        tool_responses=[make_tool_call_message(("web_search", "AI agents news"))]
+    )
+
+    update = run_researcher(language_model, web_source, feed_source)
+
+    assert feed_source.received_searches == [("AI agents news", 7)]
+    assert any("Model skipped news_feed" in entry.message for entry in update["trace_log"])
+    assert len(update["candidate_articles"]) == 7
+
+
+def test_researcher_survives_one_failing_source_on_tool_path() -> None:
+    web_source = FakeNewsSource("web_search", error=RuntimeError("quota exceeded"))
+    feed_source = FakeNewsSource("news_feed", [make_article(number) for number in range(1, 7)])
+    language_model = FakeLanguageModel(tool_responses=[search_both_tools_message()])
+
+    update = run_researcher(language_model, web_source, feed_source)
+
+    assert len(update["candidate_articles"]) == 6
+    assert any(
+        "web_search('AI agents news') failed: quota exceeded" in entry.message
+        for entry in update["trace_log"]
+    )

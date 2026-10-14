@@ -32,6 +32,7 @@ class ResearchSession:
         self.failures: list[SourceFailure] = []
         self.trace_entries: list[TraceEntry] = []
         self.tool_calls_made = 0
+        self.called_tool_names: set[str] = set()
 
     @property
     def articles(self) -> list[Article]:
@@ -51,7 +52,10 @@ class ResearchSession:
         selected_tool = self._tools_by_name.get(tool_name)
         if selected_tool is None:
             self.log(f"Model requested unknown tool '{tool_name}'")
-            return ToolMessage(content=f"Unknown tool '{tool_name}'.", tool_call_id=tool_call_id)
+            return ToolMessage(
+                content=f"Unknown tool '{tool_name}'.", tool_call_id=tool_call_id, name=tool_name
+            )
+        self.called_tool_names.add(tool_name)
         try:
             found_articles: list[Article] = selected_tool.invoke(tool_call["args"])
         except Exception as tool_error:
@@ -59,10 +63,14 @@ class ResearchSession:
                 SourceFailure(source_name=tool_name, query=query, error_message=str(tool_error))
             )
             self.log(f"{tool_name}('{query}') failed: {tool_error}")
-            return ToolMessage(content=f"Tool error: {tool_error}", tool_call_id=tool_call_id)
+            return ToolMessage(
+                content=f"Tool error: {tool_error}", tool_call_id=tool_call_id, name=tool_name
+            )
         self.article_batches.append(found_articles)
         self.log(f"{tool_name}('{query}') returned {len(found_articles)} results")
-        return ToolMessage(content=format_candidate_list(found_articles), tool_call_id=tool_call_id)
+        return ToolMessage(
+            content=format_candidate_list(found_articles), tool_call_id=tool_call_id, name=tool_name
+        )
 
 
 def build_researcher_node(
@@ -80,6 +88,7 @@ def build_researcher_node(
         run_tool_calling_loop(
             language_model, search_tools, plan, session, settings.max_research_tool_calls
         )
+        query_skipped_sources(session, tools_by_name, plan)
         articles = ensure_articles(session, aggregator, plan)
         articles = widen_if_too_few(articles, session, aggregator, plan, settings)
         if not articles:
@@ -88,6 +97,27 @@ def build_researcher_node(
         return {"candidate_articles": articles, "trace_log": session.trace_entries}
 
     return researcher_node
+
+
+def query_skipped_sources(
+    session: ResearchSession, tools_by_name: dict[str, BaseTool], plan: NewsletterPlan
+) -> None:
+    """Query each source the model never called, so every source contributes when the model made tool calls."""
+    if session.tool_calls_made == 0:
+        return
+    for tool_name in tools_by_name:
+        if tool_name in session.called_tool_names:
+            continue
+        session.log(
+            f"Model skipped {tool_name}; querying it directly with '{plan.search_queries[0]}'"
+        )
+        session.execute_tool_call(
+            {
+                "name": tool_name,
+                "args": {"query": plan.search_queries[0], "recency_days": plan.recency_days},
+                "id": f"direct_{tool_name}",
+            }
+        )
 
 
 def run_tool_calling_loop(
