@@ -1,5 +1,6 @@
 """Streamlit rendering functions. Presentation only: no agent logic lives here."""
 
+import base64
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +45,12 @@ def render_sidebar(default_goal: str, runs_remaining: int, keys_configured: bool
     return SidebarInput(
         goal=goal.strip(), mode=MODE_LABELS[mode_label], run_requested=run_requested
     )
+
+
+def email_preview_source(html_body: str) -> str:
+    """Encode newsletter HTML as a data: URL so the preview iframe gets an opaque origin."""
+    encoded_html = base64.b64encode(html_body.encode("utf-8")).decode("ascii")
+    return f"data:text/html;charset=utf-8;base64,{encoded_html}"
 
 
 def format_trace_line(trace_entry: TraceEntry) -> str:
@@ -99,7 +106,9 @@ def render_draft_review(payload: dict[str, Any], key_prefix: str) -> DraftReview
     render_critique(payload["critique"])
     preview_column, edit_column = st.columns(2)
     with preview_column:
-        st.iframe(draft["html_body"], height=PREVIEW_HEIGHT_PIXELS)
+        # A data: URL gives the preview an opaque origin so it can never reach the app,
+        # as defense in depth on top of the renderer's escaping/nh3 sanitization.
+        st.iframe(email_preview_source(draft["html_body"]), height=PREVIEW_HEIGHT_PIXELS)
     with edit_column:
         edited_subject = st.text_input(
             "Subject", value=draft["subject"], key=f"{key_prefix}_subject"
@@ -140,7 +149,9 @@ def render_delivery(final_state: dict[str, Any], sender_address: str) -> None:
     )
     if critique_scores:
         st.caption(f"Critique scores across drafts: {' → '.join(critique_scores)}")
-    st.iframe(draft.html_body, height=PREVIEW_HEIGHT_PIXELS)
+    # A data: URL gives the preview an opaque origin so it can never reach the app,
+    # as defense in depth on top of the renderer's escaping/nh3 sanitization.
+    st.iframe(email_preview_source(draft.html_body), height=PREVIEW_HEIGHT_PIXELS)
     download_column, eml_column = st.columns(2)
     download_column.download_button(
         "Download newsletter.html", draft.html_body, file_name="newsletter.html", mime="text/html"
