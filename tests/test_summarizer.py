@@ -45,3 +45,39 @@ def test_build_summaries_falls_back_to_snippet_for_missing_items() -> None:
     assert summaries[0].summary == "Snippet about agent story 1."
     assert summaries[0].why_it_matters == ""
     assert summaries[1].summary == "Only two."
+
+
+class CrashingArticleFetcher:
+    """An ArticleFetcher that raises for the first article and returns nothing otherwise."""
+
+    def __init__(self, crashing_url: str) -> None:
+        self._crashing_url = crashing_url
+
+    def fetch(self, url: str) -> str:
+        """Raise a parser error for the crashing URL, otherwise return empty text."""
+        if url == self._crashing_url:
+            raise RuntimeError("parser crashed")
+        return ""
+
+
+def test_summarizer_falls_back_to_snippet_when_fetch_raises() -> None:
+    content_tools = build_content_tools(
+        CrashingArticleFetcher(ARTICLES[0].url), NewsletterRenderer("Weekly")
+    )
+    batch = SummaryBatch(
+        items=[
+            ArticleCopy(article_number=1, summary="First summary.", why_it_matters="First why."),
+            ArticleCopy(article_number=2, summary="Second summary.", why_it_matters="Second why."),
+        ]
+    )
+    language_model = FakeLanguageModel({SummaryBatch: [batch]})
+    summarizer_node = build_summarizer_node(
+        language_model, content_tools.fetch_article, Settings(_env_file=None)
+    )
+
+    update = summarizer_node({"plan": make_plan(), "selected_articles": ARTICLES})
+
+    assert len(update["article_summaries"]) == 2
+    prompt = language_model.last_prompt(SummaryBatch)
+    assert "Text: Snippet about agent story 1." in prompt
+    assert update["trace_log"][0].message.startswith("Fetched full text for 0/2 articles")

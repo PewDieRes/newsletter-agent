@@ -24,7 +24,11 @@ def fetch_article_contents(
         return []
 
     def fetch_content(article: Article) -> str:
-        return str(fetch_article_tool.invoke({"url": article.url}))
+        # Broad on purpose: one article's fetch failure must never fail the whole run.
+        try:
+            return str(fetch_article_tool.invoke({"url": article.url}))
+        except Exception:
+            return ""
 
     with ThreadPoolExecutor(max_workers=len(articles)) as executor:
         contents = list(executor.map(fetch_content, articles))
