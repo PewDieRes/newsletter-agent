@@ -13,6 +13,9 @@ from newsletter_agent.domain.models import AgentMode, TraceEntry
 
 MODE_LABELS: dict[str, AgentMode] = {"Fully Autonomous": "auto", "Human-in-the-Loop": "hitl"}
 PREVIEW_HEIGHT_PIXELS = 720
+GOAL_MAX_CHARACTERS = 500
+FEEDBACK_MAX_CHARACTERS = 1000
+DAILY_LIMIT_MESSAGE = "Daily demo limit reached — please try again tomorrow."
 MARKDOWN_CONTROL_CHARACTERS = frozenset("\\$*_[]`#")
 
 
@@ -25,7 +28,12 @@ class SidebarInput:
     run_requested: bool
 
 
-def render_sidebar(default_goal: str, runs_remaining: int, keys_configured: bool) -> SidebarInput:
+def render_sidebar(
+    default_goal: str,
+    runs_remaining: int,
+    keys_configured: bool,
+    daily_limit_reached: bool = False,
+) -> SidebarInput:
     """Render the mode toggle, goal box, and run button."""
     with st.sidebar:
         st.header("Newsletter Agent")
@@ -34,14 +42,15 @@ def render_sidebar(default_goal: str, runs_remaining: int, keys_configured: bool
             list(MODE_LABELS),
             help="Human-in-the-Loop pauses for you to approve articles and the final draft.",
         )
-        goal = st.text_area("Goal", value=default_goal, height=130)
+        goal = st.text_area("Goal", value=default_goal, height=130, max_chars=GOAL_MAX_CHARACTERS)
         if not keys_configured:
             st.error("GOOGLE_API_KEY and TAVILY_API_KEY must be configured to run the agent.")
-        run_requested = st.button(
-            "Run agent",
-            type="primary",
-            disabled=runs_remaining <= 0 or not keys_configured or not goal.strip(),
+        run_blocked = (
+            runs_remaining <= 0 or daily_limit_reached or not keys_configured or not goal.strip()
         )
+        run_requested = st.button("Run agent", type="primary", disabled=run_blocked)
+        if daily_limit_reached:
+            st.caption(DAILY_LIMIT_MESSAGE)
         st.caption(f"Runs remaining this session: {max(runs_remaining, 0)}")
     return SidebarInput(
         goal=goal.strip(), mode=MODE_LABELS[mode_label], run_requested=run_requested
@@ -129,7 +138,11 @@ def render_draft_review(payload: dict[str, Any], key_prefix: str) -> DraftReview
         edited_markdown = st.text_area(
             "Body (Markdown)", value=draft["markdown_body"], height=380, key=f"{key_prefix}_body"
         )
-        feedback = st.text_area("Feedback for a rewrite", key=f"{key_prefix}_feedback")
+        feedback = st.text_area(
+            "Feedback for a rewrite",
+            max_chars=FEEDBACK_MAX_CHARACTERS,
+            key=f"{key_prefix}_feedback",
+        )
         approve_column, revise_column, reject_column = st.columns(3)
         approve_clicked = approve_column.button(
             "Approve & send", type="primary", key=f"{key_prefix}_approve"

@@ -1,5 +1,6 @@
 """Streamlit entry point for the Newsletter Agent."""
 
+import logging
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -16,6 +17,9 @@ from newsletter_agent.config import DEFAULT_GOAL, Settings, get_settings
 from newsletter_agent.domain.models import AgentMode, TraceEntry
 from newsletter_agent.errors import NewsletterAgentError
 from newsletter_agent.ui import components
+from newsletter_agent.ui.run_quota import DailyRunQuota
+
+UNEXPECTED_ERROR_MESSAGE = "Unexpected error — please try again."
 
 SESSION_DEFAULT_FACTORIES: dict[str, Callable[[], Any]] = {
     "thread_id": lambda: None,
@@ -31,6 +35,12 @@ SESSION_DEFAULT_FACTORIES: dict[str, Callable[[], Any]] = {
 def get_cached_runner() -> NewsletterAgentRunner:
     """Build the agent once per server process; runs are isolated by thread id."""
     return get_default_runner()
+
+
+@st.cache_resource
+def get_daily_run_quota() -> DailyRunQuota:
+    """Share one daily run counter across every session in this server process."""
+    return DailyRunQuota(get_settings().max_runs_per_day)
 
 
 def initialize_session_state() -> None:
@@ -52,6 +62,10 @@ def execute_stream(
         except NewsletterAgentError as agent_error:
             st.session_state.error_message = str(agent_error)
             status_box.update(label="Agent failed", state="error")
+        except Exception:
+            logging.getLogger(__name__).exception("Unexpected error while running the agent")
+            st.session_state.error_message = UNEXPECTED_ERROR_MESSAGE
+            status_box.update(label="Agent failed", state="error")
         else:
             status_box.update(label="Agent step finished", state="complete")
     st.session_state.result = runner.get_result(thread_id, st.session_state.error_message)
@@ -59,7 +73,10 @@ def execute_stream(
 
 
 def start_run(goal: str, mode: AgentMode) -> None:
-    """Begin a new run with a fresh thread."""
+    """Begin a new run with a fresh thread, if today's demo quota allows it."""
+    if not get_daily_run_quota().try_consume():
+        st.session_state.error_message = components.DAILY_LIMIT_MESSAGE
+        return
     runner = get_cached_runner()
     thread_id = new_thread_id()
     st.session_state.update(
@@ -96,6 +113,7 @@ def render_result(result: AgentRunResult, settings: Settings) -> None:
 def main() -> None:
     """Render the page."""
     st.set_page_config(page_title="Newsletter Agent", page_icon="📰", layout="wide")
+    logging.getLogger("trafilatura").setLevel(logging.ERROR)
     settings = get_settings()
     initialize_session_state()
     st.title("📰 Newsletter Agent")
@@ -107,6 +125,7 @@ def main() -> None:
         DEFAULT_GOAL,
         runs_remaining=settings.runs_per_session - st.session_state.runs_used,
         keys_configured=bool(settings.google_api_key and settings.tavily_api_key),
+        daily_limit_reached=get_daily_run_quota().remaining() <= 0,
     )
     if sidebar_input.run_requested:
         start_run(sidebar_input.goal, sidebar_input.mode)

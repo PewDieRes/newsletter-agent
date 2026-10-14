@@ -1,4 +1,5 @@
 import base64
+import logging
 from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
@@ -131,3 +132,71 @@ def test_render_delivery_shows_summary(tmp_path: Path) -> None:
 
     assert not app_test.exception
     assert "3 subscribers" in app_test.success[0].value
+
+
+def test_sidebar_limits_goal_length() -> None:
+    app_test = AppTest.from_file("../app.py", default_timeout=30).run()
+
+    assert app_test.sidebar.text_area[0].max_chars == 500
+
+
+def test_app_quiets_trafilatura_logging() -> None:
+    AppTest.from_file("../app.py", default_timeout=30).run()
+
+    assert logging.getLogger("trafilatura").level == logging.ERROR
+
+
+def test_sidebar_disables_run_when_daily_limit_is_reached() -> None:
+    def sidebar_script() -> None:
+        from newsletter_agent.ui.components import render_sidebar
+
+        render_sidebar("Goal", runs_remaining=3, keys_configured=True, daily_limit_reached=True)
+
+    app_test = AppTest.from_function(sidebar_script, default_timeout=30).run()
+
+    assert not app_test.exception
+    assert app_test.sidebar.button[0].disabled
+    captions = [caption.value for caption in app_test.sidebar.caption]
+    assert "Daily demo limit reached — please try again tomorrow." in captions
+
+
+def test_draft_review_limits_feedback_length() -> None:
+    def review_script() -> None:
+        from newsletter_agent.ui.components import render_draft_review
+
+        draft = {"subject": "Weekly", "markdown_body": "# Body", "html_body": "<p>Body</p>"}
+        render_draft_review({"draft": draft, "critique": {"score": 9, "issues": []}}, "test")
+
+    app_test = AppTest.from_function(review_script, default_timeout=30).run()
+
+    assert app_test.text_area(key="test_feedback").max_chars == 1000
+
+
+def test_unexpected_stream_error_shows_a_generic_message() -> None:
+    def stream_script() -> None:
+        from collections.abc import Iterator
+
+        import streamlit as st
+
+        import app
+        from newsletter_agent.agent.runner import AgentRunResult
+        from newsletter_agent.domain.models import TraceEntry
+
+        class FailingStreamRunner:
+            def get_result(self, thread_id: str, error_message: str | None) -> AgentRunResult:
+                return AgentRunResult("failed", thread_id, error_message=error_message)
+
+        def failing_stream() -> Iterator[TraceEntry]:
+            yield TraceEntry(step="planner", message="Planning")
+            raise KeyError("internal detail")
+
+        if "result" not in st.session_state:
+            st.session_state.error_message = None
+            st.session_state.trace_entries = []
+            app.execute_stream(FailingStreamRunner(), failing_stream(), "thread")
+
+    app_test = AppTest.from_function(stream_script, default_timeout=30).run()
+
+    assert not app_test.exception
+    assert app_test.session_state.error_message == "Unexpected error — please try again."
+    assert app_test.session_state.result.status == "failed"

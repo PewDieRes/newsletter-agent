@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     max_article_characters: int = 3000
 
     runs_per_session: int = 3
+    # Process-wide cap that protects the public demo's API quota.
+    max_runs_per_day: int = 40
     run_timeout_seconds: float = 120.0
 
     newsletter_name: str = "AI Agents Weekly"
