@@ -61,6 +61,7 @@ def test_subject_only_edit_rerenders_structured_html() -> None:
     assert edited_draft.subject == "Only subject"
     assert "<title>Only subject</title>" in edited_draft.html_body
     assert "AI agent story 1" in edited_draft.html_body
+    assert edited_draft.markdown_body.startswith("# Only subject")
 
 
 def test_blank_subject_edit_keeps_original_subject() -> None:

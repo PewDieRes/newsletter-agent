@@ -23,7 +23,7 @@ def apply_human_edits(
     edited_markdown: str | None,
     renderer: NewsletterRenderer,
 ) -> NewsletterDraft:
-    """Apply the human's subject and body edits and re-render the HTML to match."""
+    """Apply the human's subject and body edits and re-render the HTML and Markdown to match."""
     subject = (edited_subject or "").strip() or draft.subject
     markdown_changed = bool(edited_markdown and edited_markdown.strip()) and (
         edited_markdown.strip() != draft.markdown_body.strip()
@@ -40,7 +40,12 @@ def apply_human_edits(
         )
     if subject != draft.subject:
         retitled_draft = draft.model_copy(update={"subject": subject})
-        return retitled_draft.model_copy(update={"html_body": renderer.render_html(retitled_draft)})
+        return retitled_draft.model_copy(
+            update={
+                "html_body": renderer.render_html(retitled_draft),
+                "markdown_body": renderer.render_markdown(retitled_draft),
+            }
+        )
     return draft
 
 
