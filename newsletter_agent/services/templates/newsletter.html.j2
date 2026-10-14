@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ subject }}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1f2933;">
+<span style="display:none;max-height:0;overflow:hidden;">{{ preheader }}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:8px;">
+<tr><td style="padding:28px 32px;background-color:#1e3a8a;border-radius:8px 8px 0 0;">
+<h1 style="margin:0;font-size:24px;color:#ffffff;">{{ newsletter_name }}</h1>
+<p style="margin:6px 0 0;font-size:14px;color:#c7d2fe;">{{ issue_date }}</p>
+</td></tr>
+{% if markdown_html %}
+<tr><td style="padding:24px 32px;font-size:15px;line-height:1.6;">{{ markdown_html | safe }}</td></tr>
+{% else %}
+<tr><td style="padding:24px 32px 8px;font-size:15px;line-height:1.6;">{{ intro }}</td></tr>
+{% for item in items %}
+<tr><td style="padding:16px 32px;border-top:1px solid #e5e7eb;">
+<h2 style="margin:0 0 6px;font-size:18px;line-height:1.3;"><a href="{{ item.article.url }}" style="color:#1e3a8a;text-decoration:none;">{{ loop.index }}. {{ item.article.title }}</a></h2>
+<p style="margin:0 0 8px;font-size:12px;color:#6b7280;">{{ item.article.source_name }}{% if item.article.published_at %} &middot; {{ item.article.published_at.strftime('%b %d, %Y') }}{% endif %}</p>
+<p style="margin:0 0 8px;font-size:15px;line-height:1.6;">{{ item.summary }}</p>
+{% if item.why_it_matters %}<p style="margin:0;font-size:14px;line-height:1.5;color:#374151;"><strong>Why it matters:</strong> {{ item.why_it_matters }}</p>{% endif %}
+</td></tr>
+{% endfor %}
+<tr><td style="padding:16px 32px 24px;border-top:1px solid #e5e7eb;font-size:15px;line-height:1.6;">{{ outro }}</td></tr>
+{% endif %}
+<tr><td style="padding:16px 32px;background-color:#f9fafb;border-radius:0 0 8px 8px;font-size:12px;color:#9ca3af;">You are receiving this because you subscribed to {{ newsletter_name }}. This issue was written by an AI agent and sent in simulation mode.</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
