@@ -3,8 +3,10 @@
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import markdown
+import nh3
 from jinja2 import Environment, FileSystemLoader
 
 from newsletter_agent.domain.models import NewsletterDraft
@@ -17,6 +19,14 @@ ISSUE_DATE_FORMAT = "%B %d, %Y"
 def escape_markdown_link_text(link_text: str) -> str:
     """Escape square brackets so a title cannot break a Markdown link."""
     return link_text.replace("[", "\\[").replace("]", "\\]")
+
+
+SAFE_LINK_SCHEMES = frozenset({"http", "https"})
+
+
+def is_safe_link_url(url: str) -> bool:
+    """Return True only for http and https URLs, so untrusted links cannot run script."""
+    return urlsplit(url).scheme.lower() in SAFE_LINK_SCHEMES
 
 
 class NewsletterRenderer:
@@ -32,6 +42,7 @@ class NewsletterRenderer:
         self._environment = Environment(
             loader=FileSystemLoader(TEMPLATES_DIRECTORY), autoescape=True
         )
+        self._environment.tests["safe_link"] = is_safe_link_url
 
     def render_html(self, draft: NewsletterDraft) -> str:
         """Render the structured draft as a complete HTML email."""
@@ -45,14 +56,15 @@ class NewsletterRenderer:
         )
 
     def render_html_from_markdown(self, subject: str, preheader: str, markdown_text: str) -> str:
-        """Render human-edited Markdown inside the same email shell."""
+        """Render human-edited Markdown inside the same email shell; output is sanitized."""
+        converted_html = markdown.markdown(markdown_text, extensions=["extra"])
         return self._render(
             subject=subject,
             preheader=preheader,
             intro="",
             items=[],
             outro="",
-            markdown_html=markdown.markdown(markdown_text, extensions=["extra"]),
+            markdown_html=nh3.clean(converted_html),
         )
 
     def render_markdown(self, draft: NewsletterDraft) -> str:
@@ -60,9 +72,13 @@ class NewsletterRenderer:
         lines = [f"# {draft.subject}", "", draft.intro, ""]
         for position, item in enumerate(draft.items, start=1):
             link_text = escape_markdown_link_text(item.article.title)
+            if is_safe_link_url(item.article.url):
+                heading = f"## {position}. [{link_text}]({item.article.url})"
+            else:
+                heading = f"## {position}. {link_text}"
             lines.extend(
                 [
-                    f"## {position}. [{link_text}]({item.article.url})",
+                    heading,
                     f"*{item.article.source_name}*",
                     "",
                     item.summary,

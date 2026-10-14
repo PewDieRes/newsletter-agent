@@ -84,3 +84,39 @@ def test_render_html_from_markdown_converts_human_edits() -> None:
     assert "<title>Edited subject</title>" in rendered_html
     assert "<h1>Heading</h1>" in rendered_html
     assert "<strong>bold</strong>" in rendered_html
+
+
+def test_render_html_drops_unsafe_link_schemes() -> None:
+    unsafe_item = ArticleSummary(
+        article=Article(title="Click safely", url="javascript:alert(1)", source_name="Example"),
+        summary="Unsafe link.",
+    )
+    draft = make_draft(article_count=0).model_copy(update={"items": [unsafe_item]})
+
+    rendered_html = build_renderer().render_html(draft)
+
+    assert "javascript:" not in rendered_html
+    assert "Click safely" in rendered_html
+
+
+def test_render_markdown_drops_unsafe_link_schemes() -> None:
+    unsafe_item = ArticleSummary(
+        article=Article(title="Click safely", url="javascript:alert(1)", source_name="Example"),
+        summary="Unsafe link.",
+    )
+    draft = make_draft(article_count=0).model_copy(update={"items": [unsafe_item]})
+
+    rendered_markdown = build_renderer().render_markdown(draft)
+
+    assert "](javascript:" not in rendered_markdown
+    assert "Click safely" in rendered_markdown
+
+
+def test_render_html_from_markdown_strips_scripts() -> None:
+    rendered_html = build_renderer().render_html_from_markdown(
+        "Subject", "Preview", "Hi <script>alert(1)</script> [x](javascript:alert(2))"
+    )
+
+    assert "Hi" in rendered_html
+    assert "<script>" not in rendered_html
+    assert "javascript:" not in rendered_html
