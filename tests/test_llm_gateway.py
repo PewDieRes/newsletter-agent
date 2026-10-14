@@ -26,6 +26,16 @@ class StubRunnable:
         return response
 
 
+class FakeClock:
+    """A controllable replacement for time.monotonic."""
+
+    def __init__(self) -> None:
+        self.current_time = 1000.0
+
+    def __call__(self) -> float:
+        return self.current_time
+
+
 class StubChatModel:
     def __init__(self, structured_responses: list[Any], tool_responses: list[Any] | None = None):
         self.structured_runnable = StubRunnable(structured_responses)
@@ -100,6 +110,7 @@ def test_generate_structured_falls_back_when_primary_model_errors() -> None:
     critique = gateway.generate_structured("system", "user", CritiqueReport)
 
     assert critique.score == 9
+    assert len(primary_model.structured_runnable.received_messages) == 1
     assert len(fallback_model.structured_runnable.received_messages) == 1
 
 
@@ -122,6 +133,8 @@ def test_generate_structured_reraises_last_error_when_all_models_fail() -> None:
     with pytest.raises(RuntimeError, match="second"):
         gateway.generate_structured("system", "user", CritiqueReport)
 
+    assert len(primary_model.structured_runnable.received_messages) == 1
+
 
 def test_invoke_with_tools_falls_back_when_primary_model_errors() -> None:
     fallback_reply = AIMessage(content="from fallback")
@@ -132,6 +145,7 @@ def test_invoke_with_tools_falls_back_when_primary_model_errors() -> None:
     reply = gateway.invoke_with_tools([HumanMessage(content="go")], [])
 
     assert reply is fallback_reply
+    assert len(primary_model.tool_runnable.received_messages) == 1
 
 
 def test_build_fallback_chat_models() -> None:
@@ -166,3 +180,78 @@ def test_build_fallback_chat_models() -> None:
     assert with_fallback[0].model.endswith("gemini-b")
     assert disabled == []
     assert same_as_primary == []
+
+
+def test_primary_is_skipped_during_cooldown_after_a_provider_error() -> None:
+    primary_model = StubChatModel([RuntimeError("503 UNAVAILABLE")])
+    fallback_model = StubChatModel([make_critique(9), make_critique(8)])
+    gateway = ChatModelGateway(
+        primary_model, [fallback_model], fallback_cooldown_seconds=300.0, clock=FakeClock()
+    )
+
+    first_critique = gateway.generate_structured("system", "user", CritiqueReport)
+    second_critique = gateway.generate_structured("system", "user", CritiqueReport)
+
+    assert [first_critique.score, second_critique.score] == [9, 8]
+    assert len(primary_model.structured_runnable.received_messages) == 1
+    assert len(fallback_model.structured_runnable.received_messages) == 2
+
+
+def test_primary_is_retried_after_the_cooldown_expires() -> None:
+    fake_clock = FakeClock()
+    primary_model = StubChatModel([RuntimeError("503 UNAVAILABLE"), make_critique(10)])
+    fallback_model = StubChatModel([make_critique(9)])
+    gateway = ChatModelGateway(
+        primary_model, [fallback_model], fallback_cooldown_seconds=300.0, clock=fake_clock
+    )
+
+    gateway.generate_structured("system", "user", CritiqueReport)
+    fake_clock.current_time += 301.0
+    critique = gateway.generate_structured("system", "user", CritiqueReport)
+
+    assert critique.score == 10
+    assert len(primary_model.structured_runnable.received_messages) == 2
+    assert len(fallback_model.structured_runnable.received_messages) == 1
+
+
+def test_single_model_gateway_reraises_its_provider_error_on_every_call() -> None:
+    chat_model = StubChatModel([RuntimeError("first outage"), RuntimeError("second outage")])
+    gateway = ChatModelGateway(chat_model, clock=FakeClock())
+
+    with pytest.raises(RuntimeError, match="first outage"):
+        gateway.generate_structured("system", "user", CritiqueReport)
+    with pytest.raises(RuntimeError, match="second outage"):
+        gateway.generate_structured("system", "user", CritiqueReport)
+
+
+def test_build_chat_model_uses_a_single_attempt_when_a_fallback_exists() -> None:
+    settings = Settings(
+        _env_file=None,
+        google_api_key="test-key",
+        gemini_model="gemini-a",
+        gemini_fallback_model="gemini-b",
+        llm_max_retries=2,
+        llm_primary_max_retries_with_fallback=0,
+    )
+
+    primary_model = build_chat_model(settings)
+    fallback_model = build_fallback_chat_models(settings)[0]
+
+    assert primary_model.max_retries == 0
+    assert fallback_model.max_retries == 2
+    assert "temperature" in primary_model.model_fields_set
+    assert "temperature" not in fallback_model.model_fields_set
+
+
+def test_build_chat_model_keeps_retries_when_no_fallback_exists() -> None:
+    settings = Settings(
+        _env_file=None,
+        google_api_key="test-key",
+        gemini_model="gemini-a",
+        gemini_fallback_model="",
+        llm_max_retries=2,
+    )
+
+    primary_model = build_chat_model(settings)
+
+    assert primary_model.max_retries == 2

@@ -48,7 +48,9 @@ def build_default_dependencies(settings: Settings) -> AgentDependencies:
     http_client = build_http_client(settings.fetch_timeout_seconds)
     return AgentDependencies(
         language_model=ChatModelGateway(
-            build_chat_model(settings), build_fallback_chat_models(settings)
+            build_chat_model(settings),
+            build_fallback_chat_models(settings),
+            fallback_cooldown_seconds=settings.fallback_cooldown_seconds,
         ),
         web_search_source=TavilyNewsSource(
             TavilyClient(api_key=settings.tavily_api_key), settings.results_per_search

@@ -1,6 +1,7 @@
 """A small, provider-agnostic interface over LangChain chat models."""
 
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from typing import Any, Protocol, TypeVar, cast
 
 from langchain_core.exceptions import OutputParserException
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 from newsletter_agent.errors import StructuredOutputError
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
+ResultT = TypeVar("ResultT")
 
 STRUCTURED_OUTPUT_REMINDER = (
     "Your previous reply could not be parsed. Respond again with output that matches "
@@ -39,13 +41,22 @@ class ChatModelGateway:
     """LanguageModelGateway backed by LangChain chat models.
 
     The primary model is tried first; if it fails with a provider error (e.g. an
-    overload), each fallback model is tried in order.
+    overload), each fallback model is tried in order. After such a failure the primary
+    is skipped for a cooldown period, so an outage costs one failed call, not one per call.
     """
 
     def __init__(
-        self, chat_model: BaseChatModel, fallback_chat_models: Sequence[BaseChatModel] = ()
+        self,
+        chat_model: BaseChatModel,
+        fallback_chat_models: Sequence[BaseChatModel] = (),
+        fallback_cooldown_seconds: float = 300.0,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._chat_models = [chat_model, *fallback_chat_models]
+        self._primary_chat_model = chat_model
+        self._fallback_chat_models = list(fallback_chat_models)
+        self._fallback_cooldown_seconds = fallback_cooldown_seconds
+        self._clock = clock
+        self._primary_unavailable_until = float("-inf")
 
     def generate_structured(
         self, system_prompt: str, user_prompt: str, output_schema: type[SchemaT]
@@ -60,15 +71,51 @@ class ChatModelGateway:
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
+        return self._call_with_failover(
+            lambda chat_model: self._generate_structured_with(
+                chat_model, first_messages, output_schema
+            )
+        )
+
+    def invoke_with_tools(
+        self, messages: Sequence[BaseMessage], tools: Sequence[BaseTool]
+    ) -> AIMessage:
+        """Bind the tools and return the reply; on a provider error try the next model."""
+
+        def invoke_model(chat_model: BaseChatModel) -> AIMessage:
+            tool_model: Any = chat_model.bind_tools(list(tools))
+            return cast(AIMessage, tool_model.invoke(list(messages)))
+
+        return self._call_with_failover(invoke_model)
+
+    def _models_to_try(self) -> list[BaseChatModel]:
+        """Return the models in order, skipping the primary while it is cooling down."""
+        primary_cooling_down = self._clock() < self._primary_unavailable_until
+        if self._fallback_chat_models and primary_cooling_down:
+            return list(self._fallback_chat_models)
+        return [self._primary_chat_model, *self._fallback_chat_models]
+
+    def _call_with_failover(self, call_model: Callable[[BaseChatModel], ResultT]) -> ResultT:
+        """Run `call_model` on each model in turn until one succeeds.
+
+        StructuredOutputError propagates immediately; any other error moves on to the
+        next model, and a primary failure starts the cooldown. The last error is
+        re-raised when every model fails.
+        """
         last_error: Exception | None = None
-        for chat_model in self._chat_models:
+        for chat_model in self._models_to_try():
             try:
-                return self._generate_structured_with(chat_model, first_messages, output_schema)
+                return call_model(chat_model)
             except StructuredOutputError:
                 raise
             except Exception as model_error:
+                if chat_model is self._primary_chat_model:
+                    self._primary_unavailable_until = (
+                        self._clock() + self._fallback_cooldown_seconds
+                    )
                 last_error = model_error
-        assert last_error is not None
+        if last_error is None:
+            raise RuntimeError("No chat model was available to call.")
         raise last_error
 
     @staticmethod
@@ -93,17 +140,3 @@ class ChatModelGateway:
         raise StructuredOutputError(
             f"{output_schema.__name__} could not be generated: {failure_reason}"
         )
-
-    def invoke_with_tools(
-        self, messages: Sequence[BaseMessage], tools: Sequence[BaseTool]
-    ) -> AIMessage:
-        """Bind the tools and return the reply; on any error try the next model."""
-        last_error: Exception | None = None
-        for chat_model in self._chat_models:
-            try:
-                tool_model: Any = chat_model.bind_tools(list(tools))
-                return cast(AIMessage, tool_model.invoke(list(messages)))
-            except Exception as model_error:
-                last_error = model_error
-        assert last_error is not None
-        raise last_error

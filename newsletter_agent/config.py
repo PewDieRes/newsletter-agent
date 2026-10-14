@@ -23,8 +23,13 @@ class Settings(BaseSettings):
     gemini_fallback_model: str = "gemini-3.5-flash-lite"
     # Google recommends the default temperature of 1.0 for Gemini 3 models.
     llm_temperature: float = 1.0
-    llm_timeout_seconds: float = 60.0
-    llm_max_retries: int = 3
+    llm_timeout_seconds: float = 30.0
+    llm_max_retries: int = 2
+    # Retries for the primary when a fallback exists; 0 means a single attempt, so an
+    # overloaded primary hands over to the fallback quickly.
+    llm_primary_max_retries_with_fallback: int = 0
+    # After the primary fails, calls go straight to the fallback for this long.
+    fallback_cooldown_seconds: float = 300.0
 
     min_articles: int = 5
     max_articles: int = 7
