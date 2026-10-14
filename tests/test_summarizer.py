@@ -1,3 +1,4 @@
+from newsletter_agent.agent.nodes.formatting import SNIPPET_ONLY_TEXT_LABEL
 from newsletter_agent.agent.nodes.summarizer import build_summaries, build_summarizer_node
 from newsletter_agent.config import Settings
 from newsletter_agent.domain.llm_outputs import ArticleCopy, SummaryBatch
@@ -27,7 +28,7 @@ def test_summarizer_fetches_text_and_summarizes_every_article() -> None:
     assert sorted(fetcher.fetched_urls) == sorted(article.url for article in ARTICLES)
     prompt = language_model.last_prompt(SummaryBatch)
     assert "Text: Full article text about agents." in prompt
-    assert "Text: Snippet about agent story 2." in prompt
+    assert f"{SNIPPET_ONLY_TEXT_LABEL}: Snippet about agent story 2." in prompt
     assert [item.summary for item in update["article_summaries"]] == [
         "First summary.",
         "Second summary.",
@@ -79,5 +80,5 @@ def test_summarizer_falls_back_to_snippet_when_fetch_raises() -> None:
 
     assert len(update["article_summaries"]) == 2
     prompt = language_model.last_prompt(SummaryBatch)
-    assert "Text: Snippet about agent story 1." in prompt
+    assert f"{SNIPPET_ONLY_TEXT_LABEL}: Snippet about agent story 1." in prompt
     assert update["trace_log"][0].message.startswith("Fetched full text for 0/2 articles")

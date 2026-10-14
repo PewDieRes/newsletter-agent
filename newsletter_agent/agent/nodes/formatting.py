@@ -5,6 +5,8 @@ from collections.abc import Sequence
 from newsletter_agent.domain.models import Article, ArticleSummary
 
 SNIPPET_PREVIEW_CHARACTERS = 200
+FULL_TEXT_LABEL = "Text"
+SNIPPET_ONLY_TEXT_LABEL = "Text (headline/snippet only — summarize conservatively, add no facts)"
 
 
 def format_bullets(lines: Sequence[str]) -> str:
@@ -29,14 +31,18 @@ def format_candidate_list(articles: Sequence[Article]) -> str:
 
 
 def format_articles_with_content(articles: Sequence[Article], max_characters: int) -> str:
-    """Number articles with their full text (or snippet), truncated for the prompt."""
+    """Number articles with their full text (or snippet), truncated for the prompt.
+
+    Snippet-only articles are labelled so the model does not invent missing details.
+    """
     article_blocks = []
     for position, article in enumerate(articles, start=1):
         article_text = (article.content or article.snippet)[:max_characters]
+        text_label = FULL_TEXT_LABEL if article.content else SNIPPET_ONLY_TEXT_LABEL
         article_blocks.append(
             f"Article {position}: {article.title}\n"
             f"Source: {article.source_name}, {format_published_date(article)}\n"
-            f"Text: {article_text}"
+            f"{text_label}: {article_text}"
         )
     return "\n\n".join(article_blocks)
 

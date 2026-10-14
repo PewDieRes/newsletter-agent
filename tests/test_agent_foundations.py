@@ -78,7 +78,9 @@ def test_format_articles_with_content_prefers_content_and_truncates() -> None:
     formatted = format_articles_with_content([article_with_content, make_article(2)], 10)
 
     assert "Text: xxxxxxxxxx\n" in formatted
-    assert formatted.endswith("Text: Snippet ab")
+    assert formatted.endswith(
+        "Text (headline/snippet only — summarize conservatively, add no facts): Snippet ab"
+    )
 
 
 def test_format_summary_list_includes_urls() -> None:
