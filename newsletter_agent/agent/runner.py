@@ -3,7 +3,7 @@
 import time
 import uuid
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Literal
@@ -14,12 +14,14 @@ from langgraph.types import Command
 
 from newsletter_agent.agent.dependencies import build_default_dependencies
 from newsletter_agent.agent.graph import build_newsletter_graph
+from newsletter_agent.agent.node_names import SENDER
 from newsletter_agent.config import DEFAULT_GOAL, Settings, get_settings
 from newsletter_agent.domain.models import AgentMode, TraceEntry
 from newsletter_agent.errors import NewsletterAgentError, RunTimeoutError
 
 RunStatus = Literal["completed", "awaiting_human", "rejected", "failed"]
 GRAPH_RECURSION_LIMIT = 50
+INTERRUPT_UPDATE_KEY = "__interrupt__"
 
 
 @dataclass(frozen=True)
@@ -41,9 +43,15 @@ def new_thread_id() -> str:
 class NewsletterAgentRunner:
     """Runs the compiled graph and translates its state into results the UI understands."""
 
-    def __init__(self, graph: CompiledStateGraph, settings: Settings) -> None:
+    def __init__(
+        self,
+        graph: CompiledStateGraph,
+        settings: Settings,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._graph = graph
         self._settings = settings
+        self._clock = clock
 
     def stream_run(self, goal: str, mode: AgentMode, thread_id: str) -> Iterator[TraceEntry]:
         """Start a run and yield trace entries until it finishes or pauses for a human."""
@@ -79,17 +87,33 @@ class NewsletterAgentRunner:
         )
 
     def _stream(self, graph_input: Any, thread_id: str) -> Iterator[TraceEntry]:
-        started_at = time.monotonic()
+        started_at = self._clock()
         for graph_update in self._graph.stream(
             graph_input, self._config(thread_id), stream_mode="updates"
         ):
             for node_update in graph_update.values():
                 if isinstance(node_update, dict):
                     yield from node_update.get("trace_log", [])
-            if time.monotonic() - started_at > self._settings.run_timeout_seconds:
+            if self._ends_the_stream(graph_update):
+                continue
+            if self._clock() - started_at >= self._settings.run_timeout_seconds:
                 raise RunTimeoutError(
                     f"Run timed out after {self._settings.run_timeout_seconds:.0f} seconds"
                 )
+
+    @staticmethod
+    def _ends_the_stream(graph_update: dict[str, Any]) -> bool:
+        """Whether no node runs after this update: sent, paused for a human, or rejected.
+
+        The deadline is only enforced before another node starts, so a run that has
+        already finished or paused is never reported as timed out.
+        """
+        if SENDER in graph_update or INTERRUPT_UPDATE_KEY in graph_update:
+            return True
+        return any(
+            isinstance(node_update, dict) and node_update.get("review_decision") == "reject"
+            for node_update in graph_update.values()
+        )
 
     @staticmethod
     def _config(thread_id: str) -> dict[str, Any]:

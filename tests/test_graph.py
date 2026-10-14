@@ -1,11 +1,27 @@
+from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
+from langgraph.checkpoint.memory import InMemorySaver
+
+from newsletter_agent.agent.graph import build_newsletter_graph
 from newsletter_agent.agent.interrupts import ARTICLE_REVIEW_INTERRUPT, DRAFT_REVIEW_INTERRUPT
 from newsletter_agent.agent.node_names import PIPELINE_ORDER
-from newsletter_agent.agent.runner import resume_newsletter_agent, run_newsletter_agent
+from newsletter_agent.agent.runner import (
+    NewsletterAgentRunner,
+    resume_newsletter_agent,
+    run_newsletter_agent,
+)
 from newsletter_agent.config import DEFAULT_GOAL
 from newsletter_agent.domain.llm_outputs import NewsletterCopy
-from newsletter_agent.domain.models import Article, ArticleSummary
+from newsletter_agent.domain.models import (
+    Article,
+    ArticleSummary,
+    DeliveryReport,
+    NewsletterDraft,
+    Subscriber,
+)
+from newsletter_agent.services.email_outbox import EmailSender
 from tests.fakes import (
     FakeLanguageModel,
     FakeNewsSource,
@@ -140,3 +156,45 @@ def test_stream_run_yields_trace_entries_as_they_happen(tmp_path: Path) -> None:
 
     assert streamed_steps[0] == "planner"
     assert streamed_steps[-1] == "sender"
+
+
+class SteppingClock:
+    """A fake clock that stays still until a test moves it forward."""
+
+    def __init__(self) -> None:
+        self.current_time = 0.0
+
+    def __call__(self) -> float:
+        return self.current_time
+
+
+class ClockAdvancingSender:
+    """Wraps an EmailSender and jumps the clock far past the deadline while sending."""
+
+    def __init__(self, wrapped_sender: EmailSender, clock: SteppingClock) -> None:
+        self._wrapped_sender = wrapped_sender
+        self._clock = clock
+
+    def send(
+        self, draft: NewsletterDraft, recipients: Sequence[Subscriber], batch_name: str
+    ) -> DeliveryReport:
+        self._clock.current_time += 10_000.0
+        return self._wrapped_sender.send(draft, recipients, batch_name)
+
+
+def test_run_that_sends_after_the_deadline_is_still_completed(tmp_path: Path) -> None:
+    _runner, _language_model, dependencies = build_runner(tmp_path)
+    stepping_clock = SteppingClock()
+    slow_dependencies = replace(
+        dependencies, email_sender=ClockAdvancingSender(dependencies.email_sender, stepping_clock)
+    )
+    runner = NewsletterAgentRunner(
+        build_newsletter_graph(slow_dependencies, InMemorySaver()),
+        slow_dependencies.settings,
+        clock=stepping_clock,
+    )
+
+    result = run_newsletter_agent(DEFAULT_GOAL, mode="auto", runner=runner)
+
+    assert result.status == "completed"
+    assert result.error_message is None
