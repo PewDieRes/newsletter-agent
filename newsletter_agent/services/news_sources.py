@@ -119,7 +119,8 @@ class GoogleNewsRssSource:
         )
         response.raise_for_status()
         feed = feedparser.parse(response.text)
-        return [self._to_article(feed_entry) for feed_entry in feed.entries[: self._max_results]]
+        linked_entries = [feed_entry for feed_entry in feed.entries if feed_entry.get("link")]
+        return [self._to_article(feed_entry) for feed_entry in linked_entries[: self._max_results]]
 
     @staticmethod
     def _to_article(feed_entry: Any) -> Article:

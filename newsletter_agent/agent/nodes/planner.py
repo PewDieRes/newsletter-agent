@@ -7,12 +7,9 @@ from typing import Any
 from newsletter_agent.agent.node_names import PLANNER
 from newsletter_agent.agent.prompts import PLANNER_SYSTEM_PROMPT, PLANNER_USER_PROMPT
 from newsletter_agent.agent.state import NewsletterState
-from newsletter_agent.config import Settings
+from newsletter_agent.config import MAX_RECENCY_DAYS, MIN_RECENCY_DAYS, Settings
 from newsletter_agent.domain.models import NewsletterPlan, TraceEntry
 from newsletter_agent.services.llm_gateway import LanguageModelGateway
-
-MIN_RECENCY_DAYS = 1
-MAX_RECENCY_DAYS = 30
 
 
 def build_planner_node(

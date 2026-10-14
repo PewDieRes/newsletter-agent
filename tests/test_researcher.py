@@ -1,4 +1,5 @@
 import pytest
+from langchain_core.messages import AIMessage
 
 from newsletter_agent.agent.nodes.researcher import build_researcher_node
 from newsletter_agent.config import Settings
@@ -132,3 +133,29 @@ def test_researcher_survives_one_failing_source_on_tool_path() -> None:
         "web_search('AI agents news') failed: quota exceeded" in entry.message
         for entry in update["trace_log"]
     )
+
+
+def test_researcher_clamps_tool_call_recency_to_the_allowed_window() -> None:
+    web_source = FakeNewsSource("web_search", [make_article(number) for number in range(1, 7)])
+    feed_source = FakeNewsSource("news_feed", [make_article(7)])
+    out_of_range_calls = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "web_search",
+                "args": {"query": "AI agents news", "recency_days": 365},
+                "id": "call_1",
+            },
+            {
+                "name": "news_feed",
+                "args": {"query": "AI agents", "recency_days": 0},
+                "id": "call_2",
+            },
+        ],
+    )
+    language_model = FakeLanguageModel(tool_responses=[out_of_range_calls])
+
+    run_researcher(language_model, web_source, feed_source)
+
+    assert web_source.received_searches == [("AI agents news", 30)]
+    assert feed_source.received_searches == [("AI agents", 1)]

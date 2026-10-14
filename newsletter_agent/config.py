@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_RECENCY_DAYS = 7
+MIN_RECENCY_DAYS = 1
+MAX_RECENCY_DAYS = 30
 DEFAULT_GOAL = "Create a weekly newsletter on latest AI agent news and send it to our subscribers."
 
 

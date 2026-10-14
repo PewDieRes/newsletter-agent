@@ -12,7 +12,7 @@ from newsletter_agent.agent.node_names import RESEARCHER
 from newsletter_agent.agent.nodes.formatting import format_bullets, format_candidate_list
 from newsletter_agent.agent.prompts import RESEARCHER_SYSTEM_PROMPT, RESEARCHER_USER_PROMPT
 from newsletter_agent.agent.state import NewsletterState
-from newsletter_agent.config import Settings
+from newsletter_agent.config import MAX_RECENCY_DAYS, MIN_RECENCY_DAYS, Settings
 from newsletter_agent.domain.models import Article, NewsletterPlan, TraceEntry
 from newsletter_agent.errors import ResearchFailedError
 from newsletter_agent.services.llm_gateway import LanguageModelGateway
@@ -21,6 +21,15 @@ from newsletter_agent.services.news_aggregator import (
     SourceFailure,
     deduplicate_articles,
 )
+
+
+def clamp_recency_days(tool_arguments: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of the tool arguments with a numeric recency_days kept in range."""
+    recency_days = tool_arguments.get("recency_days")
+    if isinstance(recency_days, bool) or not isinstance(recency_days, int | float):
+        return dict(tool_arguments)
+    clamped_days = max(MIN_RECENCY_DAYS, min(int(recency_days), MAX_RECENCY_DAYS))
+    return {**tool_arguments, "recency_days": clamped_days}
 
 
 class ResearchSession:
@@ -49,6 +58,7 @@ class ResearchSession:
         tool_name = tool_call["name"]
         tool_call_id = tool_call.get("id") or tool_name
         query = str(tool_call["args"].get("query", ""))
+        tool_arguments = clamp_recency_days(tool_call["args"])
         selected_tool = self._tools_by_name.get(tool_name)
         if selected_tool is None:
             self.log(f"Model requested unknown tool '{tool_name}'")
@@ -57,7 +67,7 @@ class ResearchSession:
             )
         self.called_tool_names.add(tool_name)
         try:
-            found_articles: list[Article] = selected_tool.invoke(tool_call["args"])
+            found_articles: list[Article] = selected_tool.invoke(tool_arguments)
         except Exception as tool_error:
             self.failures.append(
                 SourceFailure(source_name=tool_name, query=query, error_message=str(tool_error))

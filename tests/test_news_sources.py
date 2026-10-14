@@ -110,3 +110,23 @@ def test_strip_html_removes_tags_and_entities() -> None:
 def test_strip_source_suffix_only_removes_matching_suffix() -> None:
     assert strip_source_suffix("Big news - TechCrunch", "TechCrunch") == "Big news"
     assert strip_source_suffix("Big news - Wired", "TechCrunch") == "Big news - Wired"
+
+
+def test_google_news_source_skips_entries_without_a_link() -> None:
+    feed_without_first_link = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Google News</title>
+<item><title>Linkless story - Example</title><source url="https://example.com">Example</source>
+<description>No link here</description></item>
+<item><title>Linked story - Example</title><link>https://news.google.com/rss/articles/linked</link>
+<source url="https://example.com">Example</source><description>Has a link</description></item>
+</channel></rss>"""
+    http_client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, text=feed_without_first_link)
+        )
+    )
+    news_source = GoogleNewsRssSource(http_client, max_results=1)
+
+    articles = news_source.search("AI agents", recency_days=7)
+
+    assert [article.url for article in articles] == ["https://news.google.com/rss/articles/linked"]
