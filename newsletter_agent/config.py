@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     google_api_key: str = ""
     tavily_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
+    # Used when the primary model errors (e.g. 503 overload); empty disables the fallback.
+    gemini_fallback_model: str = "gemini-3.5-flash-lite"
     # Google recommends the default temperature of 1.0 for Gemini 3 models.
     llm_temperature: float = 1.0
     llm_timeout_seconds: float = 60.0

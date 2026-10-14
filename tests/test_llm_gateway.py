@@ -8,7 +8,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from newsletter_agent.config import Settings
 from newsletter_agent.domain.models import CritiqueReport
 from newsletter_agent.errors import StructuredOutputError
-from newsletter_agent.services.llm_factory import build_chat_model
+from newsletter_agent.services.llm_factory import build_chat_model, build_fallback_chat_models
 from newsletter_agent.services.llm_gateway import STRUCTURED_OUTPUT_REMINDER, ChatModelGateway
 from tests.fakes import make_critique
 
@@ -90,3 +90,79 @@ def test_build_chat_model_uses_configured_gemini_model() -> None:
 
     assert isinstance(chat_model, ChatGoogleGenerativeAI)
     assert chat_model.model.endswith("gemini-test")
+
+
+def test_generate_structured_falls_back_when_primary_model_errors() -> None:
+    primary_model = StubChatModel([RuntimeError("503 UNAVAILABLE")])
+    fallback_model = StubChatModel([make_critique(9)])
+    gateway = ChatModelGateway(primary_model, [fallback_model])
+
+    critique = gateway.generate_structured("system", "user", CritiqueReport)
+
+    assert critique.score == 9
+    assert len(fallback_model.structured_runnable.received_messages) == 1
+
+
+def test_generate_structured_does_not_fall_back_on_parse_errors() -> None:
+    primary_model = StubChatModel([None, None])
+    fallback_model = StubChatModel([make_critique(9)])
+    gateway = ChatModelGateway(primary_model, [fallback_model])
+
+    with pytest.raises(StructuredOutputError):
+        gateway.generate_structured("system", "user", CritiqueReport)
+
+    assert fallback_model.structured_runnable.received_messages == []
+
+
+def test_generate_structured_reraises_last_error_when_all_models_fail() -> None:
+    primary_model = StubChatModel([RuntimeError("first")])
+    fallback_model = StubChatModel([RuntimeError("second")])
+    gateway = ChatModelGateway(primary_model, [fallback_model])
+
+    with pytest.raises(RuntimeError, match="second"):
+        gateway.generate_structured("system", "user", CritiqueReport)
+
+
+def test_invoke_with_tools_falls_back_when_primary_model_errors() -> None:
+    fallback_reply = AIMessage(content="from fallback")
+    primary_model = StubChatModel([], tool_responses=[RuntimeError("503 UNAVAILABLE")])
+    fallback_model = StubChatModel([], tool_responses=[fallback_reply])
+    gateway = ChatModelGateway(primary_model, [fallback_model])
+
+    reply = gateway.invoke_with_tools([HumanMessage(content="go")], [])
+
+    assert reply is fallback_reply
+
+
+def test_build_fallback_chat_models() -> None:
+    primary_name = "gemini-a"
+    with_fallback = build_fallback_chat_models(
+        Settings(
+            _env_file=None,
+            google_api_key="test-key",
+            gemini_model=primary_name,
+            gemini_fallback_model="gemini-b",
+        )
+    )
+    disabled = build_fallback_chat_models(
+        Settings(
+            _env_file=None,
+            google_api_key="test-key",
+            gemini_model=primary_name,
+            gemini_fallback_model="",
+        )
+    )
+    same_as_primary = build_fallback_chat_models(
+        Settings(
+            _env_file=None,
+            google_api_key="test-key",
+            gemini_model=primary_name,
+            gemini_fallback_model=primary_name,
+        )
+    )
+
+    assert len(with_fallback) == 1
+    assert isinstance(with_fallback[0], ChatGoogleGenerativeAI)
+    assert with_fallback[0].model.endswith("gemini-b")
+    assert disabled == []
+    assert same_as_primary == []

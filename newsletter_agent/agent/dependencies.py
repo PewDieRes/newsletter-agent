@@ -9,7 +9,7 @@ from newsletter_agent.config import Settings
 from newsletter_agent.domain.models import Subscriber
 from newsletter_agent.services.article_fetcher import ArticleFetcher, HttpArticleFetcher
 from newsletter_agent.services.email_outbox import EmailSender, EmlFileOutbox
-from newsletter_agent.services.llm_factory import build_chat_model
+from newsletter_agent.services.llm_factory import build_chat_model, build_fallback_chat_models
 from newsletter_agent.services.llm_gateway import ChatModelGateway, LanguageModelGateway
 from newsletter_agent.services.news_sources import (
     GoogleNewsRssSource,
@@ -47,7 +47,9 @@ def build_default_dependencies(settings: Settings) -> AgentDependencies:
     """Wire the real Gemini, Tavily, Google News, HTTP, and outbox implementations."""
     http_client = build_http_client(settings.fetch_timeout_seconds)
     return AgentDependencies(
-        language_model=ChatModelGateway(build_chat_model(settings)),
+        language_model=ChatModelGateway(
+            build_chat_model(settings), build_fallback_chat_models(settings)
+        ),
         web_search_source=TavilyNewsSource(
             TavilyClient(api_key=settings.tavily_api_key), settings.results_per_search
         ),

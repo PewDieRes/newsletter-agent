@@ -36,20 +36,49 @@ class LanguageModelGateway(Protocol):
 
 
 class ChatModelGateway:
-    """LanguageModelGateway backed by any LangChain chat model."""
+    """LanguageModelGateway backed by LangChain chat models.
 
-    def __init__(self, chat_model: BaseChatModel) -> None:
-        self._chat_model = chat_model
+    The primary model is tried first; if it fails with a provider error (e.g. an
+    overload), each fallback model is tried in order.
+    """
+
+    def __init__(
+        self, chat_model: BaseChatModel, fallback_chat_models: Sequence[BaseChatModel] = ()
+    ) -> None:
+        self._chat_models = [chat_model, *fallback_chat_models]
 
     def generate_structured(
         self, system_prompt: str, user_prompt: str, output_schema: type[SchemaT]
     ) -> SchemaT:
-        """Ask for structured output; retry once with a reminder if parsing fails."""
-        structured_model = self._chat_model.with_structured_output(output_schema)
+        """Ask for structured output, falling back to the next model on provider errors.
+
+        Parse failures are retried once with a reminder and then raise
+        StructuredOutputError without trying other models. If every model raises a
+        provider error, the last one is re-raised.
+        """
         first_messages: list[BaseMessage] = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
+        last_error: Exception | None = None
+        for chat_model in self._chat_models:
+            try:
+                return self._generate_structured_with(chat_model, first_messages, output_schema)
+            except StructuredOutputError:
+                raise
+            except Exception as model_error:
+                last_error = model_error
+        assert last_error is not None
+        raise last_error
+
+    @staticmethod
+    def _generate_structured_with(
+        chat_model: BaseChatModel,
+        first_messages: list[BaseMessage],
+        output_schema: type[SchemaT],
+    ) -> SchemaT:
+        """Run the two-attempt parse-retry logic against a single model."""
+        structured_model = chat_model.with_structured_output(output_schema)
         retry_messages = [*first_messages, HumanMessage(content=STRUCTURED_OUTPUT_REMINDER)]
         failure_reason = "no attempt made"
         for attempt_messages in (first_messages, retry_messages):
@@ -68,6 +97,13 @@ class ChatModelGateway:
     def invoke_with_tools(
         self, messages: Sequence[BaseMessage], tools: Sequence[BaseTool]
     ) -> AIMessage:
-        """Bind the tools and return the model's reply, which may contain tool calls."""
-        tool_model: Any = self._chat_model.bind_tools(list(tools))
-        return cast(AIMessage, tool_model.invoke(list(messages)))
+        """Bind the tools and return the reply; on any error try the next model."""
+        last_error: Exception | None = None
+        for chat_model in self._chat_models:
+            try:
+                tool_model: Any = chat_model.bind_tools(list(tools))
+                return cast(AIMessage, tool_model.invoke(list(messages)))
+            except Exception as model_error:
+                last_error = model_error
+        assert last_error is not None
+        raise last_error
