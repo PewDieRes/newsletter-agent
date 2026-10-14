@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>"AI agents" - Google News</title>
+    <item>
+      <title>OpenAI ships new agent toolkit - TechCrunch</title>
+      <link>https://news.google.com/rss/articles/abc123</link>
+      <pubDate>Mon, 12 Oct 2026 09:00:00 GMT</pubDate>
+      <description>&lt;a href="https://techcrunch.com/agents"&gt;OpenAI ships new agent toolkit&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color="#6f6f6f"&gt;TechCrunch&lt;/font&gt;</description>
+      <source url="https://techcrunch.com">TechCrunch</source>
+    </item>
+    <item>
+      <title>Startup raises $40M for agent observability - VentureBeat</title>
+      <link>https://news.google.com/rss/articles/def456</link>
+      <pubDate>Sun, 11 Oct 2026 15:30:00 GMT</pubDate>
+      <description>&lt;a href="https://venturebeat.com/obs"&gt;Startup raises $40M&lt;/a&gt;</description>
+      <source url="https://venturebeat.com">VentureBeat</source>
+    </item>
+  </channel>
+</rss>

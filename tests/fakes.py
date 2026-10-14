@@ -1,5 +1,6 @@
 """Builders and fakes shared by the test suite."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from newsletter_agent.domain.llm_outputs import ArticleCopy, NewsletterCopy, SummaryBatch
@@ -93,3 +94,24 @@ def make_critique(score: int) -> CritiqueReport:
         suggested_fixes=[] if score >= 8 else ["Cut the intro to two sentences"],
         passes=score >= 8,
     )
+
+
+class FakeNewsSource:
+    """A NewsSource that returns canned articles or raises a canned error."""
+
+    def __init__(
+        self,
+        name: str,
+        articles: Sequence[Article] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.name = name
+        self._articles = list(articles or [])
+        self._error = error
+        self.received_searches: list[tuple[str, int]] = []
+
+    def search(self, query: str, recency_days: int) -> list[Article]:
+        self.received_searches.append((query, recency_days))
+        if self._error is not None:
+            raise self._error
+        return list(self._articles)
