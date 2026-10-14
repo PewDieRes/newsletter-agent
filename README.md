@@ -6,7 +6,7 @@ An autonomous AI agent, built with **LangGraph** and **Google Gemini**, that tur
 
 into a researched, summarized, self-critiqued HTML newsletter, then simulates sending it to a subscriber list.
 
-**Live demo:** <APP_URL>
+**Live demo:** https://newsletter-agent-4827.streamlit.app/
 
 ## How it works
 
