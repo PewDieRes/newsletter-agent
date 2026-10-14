@@ -1,9 +1,14 @@
+import logging
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
-from langgraph.checkpoint.memory import InMemorySaver
+import pytest
+from langgraph.checkpoint.serde import _msgpack as langgraph_msgpack
+from langgraph.checkpoint.serde.event_hooks import register_serde_event_listener
 
+from newsletter_agent.agent.checkpointing import build_checkpointer
 from newsletter_agent.agent.graph import build_newsletter_graph
 from newsletter_agent.agent.interrupts import ARTICLE_REVIEW_INTERRUPT, DRAFT_REVIEW_INTERRUPT
 from newsletter_agent.agent.node_names import PIPELINE_ORDER
@@ -17,9 +22,12 @@ from newsletter_agent.domain.llm_outputs import NewsletterCopy
 from newsletter_agent.domain.models import (
     Article,
     ArticleSummary,
+    CritiqueReport,
     DeliveryReport,
     NewsletterDraft,
+    NewsletterPlan,
     Subscriber,
+    TraceEntry,
 )
 from newsletter_agent.services.email_outbox import EmailSender
 from tests.fakes import (
@@ -189,7 +197,7 @@ def test_run_that_sends_after_the_deadline_is_still_completed(tmp_path: Path) ->
         dependencies, email_sender=ClockAdvancingSender(dependencies.email_sender, stepping_clock)
     )
     runner = NewsletterAgentRunner(
-        build_newsletter_graph(slow_dependencies, InMemorySaver()),
+        build_newsletter_graph(slow_dependencies, build_checkpointer()),
         slow_dependencies.settings,
         clock=stepping_clock,
     )
@@ -198,3 +206,45 @@ def test_run_that_sends_after_the_deadline_is_still_completed(tmp_path: Path) ->
 
     assert result.status == "completed"
     assert result.error_message is None
+
+
+@pytest.mark.parametrize("strict_msgpack", [False, True], ids=["default", "strict"])
+def test_checkpointed_domain_models_survive_resume_without_serde_warnings(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    strict_msgpack: bool,
+) -> None:
+    # The strict flag is read once at import time, so patch the module value as well.
+    monkeypatch.setenv("LANGGRAPH_STRICT_MSGPACK", "true" if strict_msgpack else "false")
+    monkeypatch.setattr(langgraph_msgpack, "STRICT_MSGPACK_ENABLED", strict_msgpack)
+    serde_events: list[dict[str, Any]] = []
+    unregister_listener = register_serde_event_listener(serde_events.append)
+    runner, _language_model, _dependencies = build_runner(tmp_path)
+    thread_id = f"checkpoint-thread-{strict_msgpack}"
+
+    try:
+        with caplog.at_level(logging.WARNING):
+            result = run_newsletter_agent(
+                DEFAULT_GOAL, mode="hitl", thread_id=thread_id, runner=runner
+            )
+            chosen_urls = [
+                candidate["url"] for candidate in result.pending_interrupt["candidates"][:3]
+            ]
+            resume_newsletter_agent(thread_id, {"selected_urls": chosen_urls}, runner=runner)
+            result = resume_newsletter_agent(thread_id, {"decision": "approve"}, runner=runner)
+    finally:
+        unregister_listener()
+
+    assert result.status == "completed"
+    assert serde_events == []
+    assert "Deserializing unregistered type" not in caplog.text
+    assert "Blocked deserialization" not in caplog.text
+    final_state = result.final_state
+    assert isinstance(final_state["plan"], NewsletterPlan)
+    assert isinstance(final_state["candidate_articles"][0], Article)
+    assert isinstance(final_state["article_summaries"][0], ArticleSummary)
+    assert isinstance(final_state["draft"], NewsletterDraft)
+    assert isinstance(final_state["critique_history"][0], CritiqueReport)
+    assert isinstance(final_state["trace_log"][0], TraceEntry)
+    assert isinstance(final_state["delivery_report"], DeliveryReport)

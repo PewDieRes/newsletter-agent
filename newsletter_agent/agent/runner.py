@@ -8,10 +8,10 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Literal
 
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
+from newsletter_agent.agent.checkpointing import build_checkpointer
 from newsletter_agent.agent.dependencies import build_default_dependencies
 from newsletter_agent.agent.graph import build_newsletter_graph
 from newsletter_agent.agent.node_names import SENDER
@@ -124,7 +124,7 @@ class NewsletterAgentRunner:
 def get_default_runner() -> NewsletterAgentRunner:
     """Build the production runner once per process."""
     settings = get_settings()
-    graph = build_newsletter_graph(build_default_dependencies(settings), InMemorySaver())
+    graph = build_newsletter_graph(build_default_dependencies(settings), build_checkpointer())
     return NewsletterAgentRunner(graph, settings)
 
 

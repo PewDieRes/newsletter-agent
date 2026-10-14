@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage
-from langgraph.checkpoint.memory import InMemorySaver
 
 from newsletter_agent.config import Settings
 from newsletter_agent.domain.llm_outputs import (
@@ -259,9 +258,10 @@ def build_test_dependencies(
 
 
 def build_test_runner(dependencies):
+    from newsletter_agent.agent.checkpointing import build_checkpointer
     from newsletter_agent.agent.graph import build_newsletter_graph
     from newsletter_agent.agent.runner import NewsletterAgentRunner
 
     return NewsletterAgentRunner(
-        build_newsletter_graph(dependencies, InMemorySaver()), dependencies.settings
+        build_newsletter_graph(dependencies, build_checkpointer()), dependencies.settings
     )
