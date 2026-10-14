@@ -179,3 +179,22 @@ class FakeLanguageModel:
             if called_schema is output_schema
         ]
         return matching_prompts[-1]
+
+
+def make_tool_call_message(*tool_calls: tuple[str, str]) -> AIMessage:
+    """Build a model reply that calls tools; each tuple is (tool_name, query)."""
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": tool_name,
+                "args": {"query": query, "recency_days": 7},
+                "id": f"call_{position}",
+            }
+            for position, (tool_name, query) in enumerate(tool_calls, start=1)
+        ],
+    )
+
+
+def search_both_tools_message() -> AIMessage:
+    return make_tool_call_message(("web_search", "AI agents news"), ("news_feed", "AI agents"))
